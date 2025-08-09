@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-config-collector
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: node-config-collector
+  template:
+    metadata:
+      labels:
+        name: node-config-collector
+    spec:
+      terminationGracePeriodSeconds: 30
+      hostPID: true
+      tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
+      containers:
+      - image: nicolaka/netshoot
+        name: collector
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          #!/bin/sh
+          set -e
+
+          check_mount() {
+            path=$1
+            if [ ! -d "/host$path" ]; then
+              echo "$path non esiste su questo nodo."
+              return
+            fi
+            
+            path_device=$(df "/host$path" | awk 'NR==2 {print $1}')
+            root_device=$(df /host | awk 'NR==2 {print $1}')
+
+            if [ "$path_device" = "$root_device" ]; then
+              echo "$path si trova sul filesystem di root."
+            else
+              disk_size=$(df -h "/host$path" | awk 'NR==3 {print $1}')
+              echo "$path si trova su un disco dedicato ($path_device) con dimensione: $disk_size"
+            fi
+          }
+
+          echo "--- Informazioni per il nodo: $MY_NODE_NAME ---"
+
+          echo "\n[CPU Info]"
+          CPU_COUNT=$(grep -c ^processor /host/proc/cpuinfo)
+          echo "Core CPU: $CPU_COUNT"
+
+          echo "\n[RAM Info]"
+          RAM_SIZE=$(free -h | grep Mem: | awk '{print $2}')
+          echo "RAM Totale: $RAM_SIZE"
+
+          echo "\n[Disk Info]"
+          check_mount "/var/lib/rancher"
+          check_mount "/var/lib/kubelet"
+
+          echo "\n[Network Info]"
+          ip -o addr show
+
+          echo "\n--- Controllo completato. Il container rimarrà in esecuzione per ispezione. ---"
+          sleep infinity
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: host-root
+          readOnly: true
+          mountPath: /host

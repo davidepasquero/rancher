@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-config-collector
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: node-config-collector
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: node-config-collector
+    spec:
+      tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      hostPID: true
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
+      containers:
+      - name: collector
+        image: nicolaka/netshoot
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+          readOnly: true
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          #!/bin/sh
+          set -e
+
+          check_mount() {
+            path=$1
+            if [ ! -d "/host$path" ]; then
+              echo "$path non esiste su questo nodo."
+              return
+            fi
+            
+            path_device=$(df "/host$path" | awk 'NR==2 {print $1}')
+            root_device=$(df /host | awk 'NR==2 {print $1}')
+
+            if [ "$path_device" = "$root_device" ]; then
+              echo "$path si trova sul filesystem di root."
+            else
+              df_output=$(df -h "/host$path")
+              disk_size=$(echo "$df_output" | awk 'NR==2 {print $2}')
+              echo "$path si trova su un disco dedicato ($path_device) con dimensione: $disk_size"
+            fi
+          }
+
+          echo "--- Informazioni per il nodo: $MY_NODE_NAME ---"
+
+          echo "\n[CPU Info]"
+          CPU_COUNT=$(grep -c ^processor /host/proc/cpuinfo)
+          echo "Core CPU: $CPU_COUNT"
+
+          echo "\n[RAM Info]"
+          RAM_SIZE=$(free -h | grep Mem: | awk '{print $2}')
+          echo "RAM Totale: $RAM_SIZE"
+
+          echo "\n[Disk Info]"
+          check_mount "/var/lib/rancher"
+          check_mount "/var/lib/kubelet"
+
+          echo "\n[Network Info]"
+          ip -o addr show
+
+          echo "\n--- Controllo completato. Il container rimarrà in esecuzione per ispezione. ---"
+          sleep infinity
+      terminationGracePeriodSeconds: 30
