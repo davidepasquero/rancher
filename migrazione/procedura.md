@@ -49,7 +49,8 @@ for pod in $POD_LIST; do
   echo "================================================================="
   echo "LOGS PER IL POD: $pod"
   echo "================================================================="
-  kubectl logs -n kube-system $pod
+  kubectl logs -n kube-system $pod > /tmp/$pod.log
+  cat /tmp/$pod.log
   echo
 done
 ```
