@@ -68,7 +68,7 @@ spec:
           check_mount "/var/lib/kubelet"
 
           echo "\n[Network Info]"
-          ip -o addr show
+          ip -o addr show | grep -w "ens[a-zA-Z0-9]*"
 
           echo "\n--- Controllo completato. Il container rimarrà in esecuzione per ispezione. ---"
           sleep infinity
